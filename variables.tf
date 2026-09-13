@@ -81,3 +81,20 @@ variable "lambda_repo" {
   type        = string
   default     = "oficina-lambda-auth"
 }
+
+variable "github_owner_id" {
+  description = "Numeric GitHub id of the owner, present in the new OIDC subject format"
+  type        = string
+  default     = "64619002"
+}
+
+variable "repo_ids" {
+  description = "Numeric GitHub ids of the repositories, present in the new OIDC subject format"
+  type        = map(string)
+  default = {
+    oficina-api         = "1226887421"
+    oficina-infra-k8s   = "1368526430"
+    oficina-infra-db    = "1368526513"
+    oficina-lambda-auth = "1368526604"
+  }
+}
