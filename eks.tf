@@ -6,7 +6,7 @@ module "eks" {
   cluster_version = var.cluster_version
 
   cluster_endpoint_public_access           = true
-  enable_cluster_creator_admin_permissions = true
+  enable_cluster_creator_admin_permissions = false
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -21,31 +21,47 @@ module "eks" {
     }
   }
 
-  access_entries = {
-    app_github_actions = {
-      principal_arn = module.app_github_actions_role.arn
+  access_entries = merge(
+    {
+      for index, arn in var.cluster_admin_principal_arns : "cluster_admin_${index}" => {
+        principal_arn = arn
 
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+    },
+    {
+      app_github_actions = {
+        principal_arn = module.app_github_actions_role.arn
+
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+
+      k8s_infra_github_actions = {
+        principal_arn = module.k8s_infra_github_actions_role.arn
+
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
           }
         }
       }
     }
-
-    k8s_infra_github_actions = {
-      principal_arn = module.k8s_infra_github_actions_role.arn
-
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
+  )
 }

@@ -98,3 +98,9 @@ variable "repo_ids" {
     oficina-lambda-auth = "1368526604"
   }
 }
+
+variable "cluster_admin_principal_arns" {
+  description = "IAM principals (users or roles) that get cluster-admin access, e.g. the operator running Terraform locally"
+  type        = list(string)
+  default     = ["arn:aws:iam::728750563430:user/fiap-deploy"]
+}
