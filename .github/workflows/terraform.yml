@@ -64,6 +64,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     environment: production
+    env:
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -78,9 +80,7 @@ jobs:
       - name: Install metrics-server
         run: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
       - name: Install New Relic Kubernetes integration
-        if: ${{ secrets.NEW_RELIC_LICENSE_KEY != '' }}
-        env:
-          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        if: env.NEW_RELIC_LICENSE_KEY != ''
         run: |
           helm repo add newrelic https://helm-charts.newrelic.com
           helm repo update
