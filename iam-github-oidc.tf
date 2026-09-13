@@ -1,3 +1,12 @@
+locals {
+  github_subjects = {
+    for repo, id in var.repo_ids : repo => [
+      "repo:${var.github_owner}/${repo}:*",
+      "repo:${var.github_owner}@${var.github_owner_id}/${repo}@${id}:*",
+    ]
+  }
+}
+
 module "github_oidc_provider" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-provider"
   version = "~> 5.44"
@@ -34,7 +43,7 @@ module "app_github_actions_role" {
   version = "~> 5.44"
 
   name     = "${var.project_name}-app-github-actions"
-  subjects = ["repo:${var.github_owner}/${var.app_repo}:*"]
+  subjects = local.github_subjects[var.app_repo]
 
   policies = {
     ecr    = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
@@ -49,7 +58,7 @@ module "k8s_infra_github_actions_role" {
   version = "~> 5.44"
 
   name     = "${var.project_name}-k8s-infra-github-actions"
-  subjects = ["repo:${var.github_owner}/${var.k8s_infra_repo}:*"]
+  subjects = local.github_subjects[var.k8s_infra_repo]
 
   policies = {
     admin = "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -63,7 +72,7 @@ module "db_infra_github_actions_role" {
   version = "~> 5.44"
 
   name     = "${var.project_name}-db-infra-github-actions"
-  subjects = ["repo:${var.github_owner}/${var.db_infra_repo}:*"]
+  subjects = local.github_subjects[var.db_infra_repo]
 
   policies = {
     admin = "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -77,7 +86,7 @@ module "lambda_github_actions_role" {
   version = "~> 5.44"
 
   name     = "${var.project_name}-lambda-github-actions"
-  subjects = ["repo:${var.github_owner}/${var.lambda_repo}:*"]
+  subjects = local.github_subjects[var.lambda_repo]
 
   policies = {
     admin = "arn:aws:iam::aws:policy/AdministratorAccess"
