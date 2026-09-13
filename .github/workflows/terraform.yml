@@ -1,0 +1,129 @@
+name: Terraform
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply or destroy"
+        required: true
+        default: "apply"
+        type: choice
+        options: ["apply", "destroy"]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: terraform-k8s
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init -input=false
+      - id: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+      - name: Comment plan on pull request
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const body = `### Terraform plan (oficina-infra-k8s)\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${process.env.PLAN.slice(0, 60000)}\n\`\`\`\n\n</details>`;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+
+  apply:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init -input=false
+      - run: terraform apply -auto-approve -input=false
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region "$AWS_REGION"
+      - name: Install metrics-server
+        run: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+      - name: Install New Relic Kubernetes integration
+        if: ${{ secrets.NEW_RELIC_LICENSE_KEY != '' }}
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com
+          helm repo update
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --namespace newrelic --create-namespace --wait --timeout 10m \
+            --set global.licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --set global.cluster="$(terraform output -raw cluster_name)" \
+            --set global.lowDataMode=true \
+            --set newrelic-infrastructure.privileged=true \
+            --set kube-state-metrics.enabled=true \
+            --set kubeEvents.enabled=true \
+            --set newrelic-logging.enabled=true \
+            --set newrelic-logging.lowDataMode=false \
+            --set nri-metadata-injection.enabled=true \
+            --set newrelic-prometheus-agent.enabled=false \
+            --set newrelic-pixie.enabled=false \
+            --set pixie-chart.enabled=false
+      - name: Summary
+        run: |
+          {
+            echo "### oficina-infra-k8s applied"
+            echo
+            echo '```'
+            terraform output
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init -input=false
+      - name: Remove Kubernetes load balancers before destroying the VPC
+        run: |
+          aws eks update-kubeconfig --name "$(terraform output -raw cluster_name)" --region "$AWS_REGION" || exit 0
+          kubectl delete svc --all-namespaces --field-selector spec.type=LoadBalancer --ignore-not-found --wait=true || true
+          sleep 60
+      - run: terraform destroy -auto-approve -input=false
