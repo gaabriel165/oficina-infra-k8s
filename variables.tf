@@ -61,7 +61,7 @@ variable "github_owner" {
 variable "app_repo" {
   description = "Repository of the main application (Kubernetes workload)"
   type        = string
-  default     = "oficina-api"
+  default     = "oficina-os-service"
 }
 
 variable "k8s_infra_repo" {
@@ -92,7 +92,7 @@ variable "repo_ids" {
   description = "Numeric GitHub ids of the repositories, present in the new OIDC subject format"
   type        = map(string)
   default = {
-    oficina-api         = "1226887421"
+    oficina-os-service  = "1226887421"
     oficina-infra-k8s   = "1368526430"
     oficina-infra-db    = "1368526513"
     oficina-lambda-auth = "1368526604"
