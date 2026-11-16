@@ -62,6 +62,20 @@ module "eks" {
           }
         }
       }
+    },
+    {
+      for repo in var.service_repos : "${repo}_github_actions" => {
+        principal_arn = module.service_github_actions_role[repo].arn
+
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
     }
   )
 }

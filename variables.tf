@@ -31,7 +31,7 @@ variable "vpc_cidr" {
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group"
   type        = string
-  default     = "t3.small"
+  default     = "t3.medium"
 }
 
 variable "node_desired_size" {
@@ -53,15 +53,21 @@ variable "node_max_size" {
 }
 
 variable "github_owner" {
-  description = "GitHub owner of the four project repositories"
+  description = "GitHub owner of the project repositories"
   type        = string
   default     = "gaabriel165"
 }
 
 variable "app_repo" {
-  description = "Repository of the main application (Kubernetes workload)"
+  description = "Repository of the service order microservice (saga orchestrator)"
   type        = string
   default     = "oficina-os-service"
+}
+
+variable "service_repos" {
+  description = "Repositories of the other microservices; each one gets an ECR repository and a deploy role"
+  type        = set(string)
+  default     = ["oficina-billing-service", "oficina-execution-service"]
 }
 
 variable "k8s_infra_repo" {
@@ -92,10 +98,12 @@ variable "repo_ids" {
   description = "Numeric GitHub ids of the repositories, present in the new OIDC subject format"
   type        = map(string)
   default = {
-    oficina-os-service  = "1226887421"
-    oficina-infra-k8s   = "1368526430"
-    oficina-infra-db    = "1368526513"
-    oficina-lambda-auth = "1368526604"
+    oficina-os-service        = "1226887421"
+    oficina-billing-service   = "1460124757"
+    oficina-execution-service = "1460124971"
+    oficina-infra-k8s         = "1368526430"
+    oficina-infra-db          = "1368526513"
+    oficina-lambda-auth       = "1368526604"
   }
 }
 

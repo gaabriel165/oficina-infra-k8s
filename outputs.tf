@@ -44,8 +44,23 @@ output "configure_kubectl" {
 }
 
 output "ecr_repository_url" {
-  description = "ECR repository URL for the application image"
+  description = "ECR repository URL for the service order microservice image"
   value       = aws_ecr_repository.app.repository_url
+}
+
+output "service_ecr_repository_urls" {
+  description = "ECR repository URL of each other microservice, keyed by repository name"
+  value       = { for repo, repository in aws_ecr_repository.service : repo => repository.repository_url }
+}
+
+output "oidc_provider_arn" {
+  description = "IAM OIDC provider of the cluster, trusted by the pod roles of each microservice (IRSA)"
+  value       = module.eks.oidc_provider_arn
+}
+
+output "oidc_provider" {
+  description = "Issuer of the cluster OIDC provider without the https:// prefix"
+  value       = module.eks.oidc_provider
 }
 
 output "jwt_secret_parameter_name" {
@@ -53,14 +68,19 @@ output "jwt_secret_parameter_name" {
   value       = aws_ssm_parameter.jwt_secret.name
 }
 
-output "webhook_secret_parameter_name" {
-  description = "SSM parameter holding the webhook shared secret"
-  value       = aws_ssm_parameter.webhook_secret.name
+output "internal_api_secret_parameter_name" {
+  description = "SSM parameter holding the secret of the internal service-to-service routes"
+  value       = aws_ssm_parameter.internal_api_secret.name
 }
 
 output "app_github_actions_role_arn" {
-  description = "Role assumed by the application repository pipeline"
+  description = "Role assumed by the service order microservice pipeline"
   value       = module.app_github_actions_role.arn
+}
+
+output "service_github_actions_role_arns" {
+  description = "Role assumed by the pipeline of each other microservice, keyed by repository name"
+  value       = { for repo, role in module.service_github_actions_role : repo => role.arn }
 }
 
 output "k8s_infra_github_actions_role_arn" {

@@ -3,21 +3,21 @@ resource "random_password" "jwt_secret" {
   special = false
 }
 
-resource "random_password" "webhook_secret" {
+resource "random_password" "internal_api_secret" {
   length  = 32
   special = false
 }
 
 resource "aws_ssm_parameter" "jwt_secret" {
   name        = "/${var.project_name}/jwt_secret"
-  description = "HS256 signing key shared by the API and the authentication Lambda"
+  description = "HS256 signing key shared by the microservices and the authentication Lambda"
   type        = "SecureString"
   value       = random_password.jwt_secret.result
 }
 
-resource "aws_ssm_parameter" "webhook_secret" {
-  name        = "/${var.project_name}/webhook_secret"
-  description = "Shared secret expected on the budget approval webhook"
+resource "aws_ssm_parameter" "internal_api_secret" {
+  name        = "/${var.project_name}/internal_api_secret"
+  description = "Shared secret the authentication Lambda sends to the internal routes of the service order microservice"
   type        = "SecureString"
-  value       = random_password.webhook_secret.result
+  value       = random_password.internal_api_secret.result
 }

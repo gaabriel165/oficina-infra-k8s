@@ -12,32 +12,6 @@ module "github_oidc_provider" {
   version = "~> 5.44"
 }
 
-resource "aws_iam_policy" "app_deploy" {
-  name        = "${var.project_name}-app-deploy"
-  description = "Describe the EKS cluster and read application parameters during deploy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["eks:DescribeCluster", "eks:ListClusters"]
-        Resource = "*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = "arn:aws:ssm:${var.region}:*:parameter/${var.project_name}/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
 module "app_github_actions_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-role"
   version = "~> 5.44"
@@ -46,8 +20,22 @@ module "app_github_actions_role" {
   subjects = local.github_subjects[var.app_repo]
 
   policies = {
-    ecr    = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
-    deploy = aws_iam_policy.app_deploy.arn
+    admin = "arn:aws:iam::aws:policy/AdministratorAccess"
+  }
+
+  depends_on = [module.github_oidc_provider]
+}
+
+module "service_github_actions_role" {
+  source   = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-role"
+  version  = "~> 5.44"
+  for_each = var.service_repos
+
+  name     = "${each.value}-github-actions"
+  subjects = local.github_subjects[each.value]
+
+  policies = {
+    admin = "arn:aws:iam::aws:policy/AdministratorAccess"
   }
 
   depends_on = [module.github_oidc_provider]
