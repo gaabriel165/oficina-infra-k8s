@@ -2,16 +2,19 @@
 
 [![Terraform](https://github.com/gaabriel165/oficina-infra-k8s/actions/workflows/terraform.yml/badge.svg)](https://github.com/gaabriel165/oficina-infra-k8s/actions/workflows/terraform.yml)
 
-Provisiona, com **Terraform**, a base de rede e computação onde a [oficina-api](https://github.com/gaabriel165/oficina-api) roda: VPC, cluster **Amazon EKS**, registro **ECR**, identidade **OIDC** para o GitHub Actions e os segredos compartilhados no **SSM Parameter Store**. É o primeiro dos três repositórios de infraestrutura a ser aplicado; os outros ([oficina-infra-db](https://github.com/gaabriel165/oficina-infra-db) e [oficina-lambda-auth](https://github.com/gaabriel165/oficina-lambda-auth)) leem o state deste via `terraform_remote_state`.
+Provisiona, com **Terraform**, a base de rede e computação onde rodam os três microsserviços ([oficina-os-service](https://github.com/gaabriel165/oficina-os-service), [oficina-billing-service](https://github.com/gaabriel165/oficina-billing-service) e [oficina-execution-service](https://github.com/gaabriel165/oficina-execution-service)): VPC, cluster **Amazon EKS**, registros **ECR**, identidade **OIDC** para o GitHub Actions e os segredos compartilhados no **SSM Parameter Store**. É o primeiro repositório a ser aplicado; todos os outros leem o state deste via `terraform_remote_state`.
 
-Parte do Tech Challenge da pós-graduação em Arquitetura de Software (FIAP SOAT) — Fase 3. Documentação completa da arquitetura: [`oficina-api/docs/architecture`](https://github.com/gaabriel165/oficina-api/tree/main/docs/architecture).
+Parte do Tech Challenge da pós-graduação em Arquitetura de Software (FIAP SOAT) — Fases 3 e 4. Documentação completa da arquitetura: [`oficina-os-service/docs/architecture`](https://github.com/gaabriel165/oficina-os-service/tree/main/docs/architecture).
+
+O que é exclusivo de um microsserviço (filas, banco, role dos pods) **não** fica aqui: cada serviço provisiona a própria infraestrutura no diretório `terraform/` do seu repositório. Este repositório guarda só o que é compartilhado.
 
 ## Propósito
 
 - Criar um cluster Kubernetes gerenciado com **escalabilidade** (managed node group 2..4 nós, HPA na aplicação).
 - Isolar a aplicação e o banco em **subnets privadas**; só o load balancer fica em subnets públicas.
-- Permitir que os quatro pipelines façam deploy **sem chaves estáticas** (GitHub OIDC → IAM roles).
-- Gerar os segredos compartilhados entre a API e a Lambda de autenticação (`/oficina-api/jwt_secret`, `/oficina-api/webhook_secret`) uma única vez, no SSM.
+- Permitir que os seis pipelines façam deploy **sem chaves estáticas** (GitHub OIDC → IAM roles).
+- Expor o provedor OIDC do cluster, usado por cada microsserviço para criar a role dos seus pods (IRSA).
+- Gerar os segredos compartilhados (`/oficina-api/jwt_secret`, aceito pelos três serviços e pela Lambda, e `/oficina-api/internal_api_secret`, usado pela Lambda nas rotas internas do OS Service) uma única vez, no SSM.
 - Instalar no cluster o `metrics-server` (pré-requisito do HPA) e a integração **New Relic** (`nri-bundle`: infra agent, kube-state-metrics, eventos e logs).
 
 ## Tecnologias
@@ -19,7 +22,7 @@ Parte do Tech Challenge da pós-graduação em Arquitetura de Software (FIAP SOA
 | Categoria | Tecnologias |
 |---|---|
 | IaC | Terraform ≥ 1.10, provider AWS 5.x, módulos oficiais `terraform-aws-modules` (vpc, eks, iam) |
-| Nuvem | AWS us-east-1 — VPC, EKS 1.34 (AMI AL2023), EC2 t3.small, ECR, IAM OIDC, SSM Parameter Store |
+| Nuvem | AWS us-east-1 — VPC, EKS 1.34 (AMI AL2023), EC2 t3.medium, ECR, IAM OIDC, SSM Parameter Store |
 | State | S3 `oficina-api-terraform-state-728750563430` (versionado, criptografado, lock nativo `use_lockfile`) |
 | CI/CD | GitHub Actions — `fmt`/`validate`/`plan` no PR, `apply` no merge em `main`, `destroy` por `workflow_dispatch` |
 | Cluster add-ons | metrics-server, New Relic `nri-bundle` via Helm |
@@ -40,15 +43,15 @@ flowchart LR
             Pub["Subnets públicas - NAT Gateway"]
             Priv["Subnets privadas"]
             subgraph EKS["EKS 1.34"]
-                NG["Managed node group t3.small 2..4 - AL2023"]
+                NG["Managed node group t3.medium 2..4 - AL2023"]
                 MS["metrics-server"]
                 NRB["New Relic nri-bundle"]
             end
         end
-        ECR[("ECR oficina-api")]
+        ECR[("ECR: um repositório por microsserviço")]
         OIDC["OIDC provider GitHub"]
-        Roles["4 roles IAM: app, k8s-infra, db-infra, lambda"]
-        SSM[("SSM: jwt_secret, webhook_secret")]
+        Roles["6 roles IAM: os, billing, execution, k8s-infra, db-infra, lambda"]
+        SSM[("SSM: jwt_secret, internal_api_secret")]
     end
 
     Apply -.-> S3
@@ -62,7 +65,7 @@ flowchart LR
     Apply -->|"helm upgrade --install"| NRB
     OIDC --> Roles
     Roles -.->|"assumidas via OIDC"| GitHub
-    S3 -.->|"remote state lido por"| Consumers["oficina-infra-db e oficina-lambda-auth"]
+    S3 -.->|"remote state lido por"| Consumers["os três microsserviços, oficina-infra-db e oficina-lambda-auth"]
 ```
 
 ### Recursos criados
@@ -70,11 +73,15 @@ flowchart LR
 | Arquivo | Recursos |
 |---|---|
 | `vpc.tf` | VPC `10.0.0.0/16`, 2 AZs, 2 subnets públicas (tag `kubernetes.io/role/elb`) e 2 privadas, 1 NAT Gateway |
-| `eks.tf` | Cluster EKS 1.34, node group `t3.small` (min 2 / max 4), access entries para os roles de CI |
-| `ecr.tf` | Repositório `oficina-api` com scan de vulnerabilidades no push |
-| `iam-github-oidc.tf` | Provider OIDC do GitHub + 4 roles: `oficina-api-app-github-actions` (ECR + describe EKS + leitura SSM), `oficina-api-k8s-infra-github-actions`, `oficina-api-db-infra-github-actions`, `oficina-api-lambda-github-actions` |
-| `ssm.tf` | `random_password` → SSM SecureString `/oficina-api/jwt_secret` e `/oficina-api/webhook_secret` |
-| `outputs.tf` | `vpc_id`, `private_subnet_ids`, `node_security_group_id`, `cluster_name`, `ecr_repository_url`, nomes dos parâmetros SSM e ARNs dos roles |
+| `eks.tf` | Cluster EKS 1.34, node group `t3.medium` (min 2 / max 4), access entries para os roles de deploy dos três microsserviços e deste repositório |
+| `ecr.tf` | Repositórios `oficina-api` (OS Service), `oficina-billing-service` e `oficina-execution-service`, com scan de vulnerabilidades no push |
+| `iam-github-oidc.tf` | Provider OIDC do GitHub + 6 roles: `oficina-api-app-github-actions` (OS Service), `oficina-billing-service-github-actions`, `oficina-execution-service-github-actions`, `oficina-api-k8s-infra-github-actions`, `oficina-api-db-infra-github-actions` e `oficina-api-lambda-github-actions` |
+| `ssm.tf` | `random_password` → SSM SecureString `/oficina-api/jwt_secret` e `/oficina-api/internal_api_secret` |
+| `outputs.tf` | `vpc_id`, `private_subnet_ids`, `node_security_group_id`, `cluster_name`, URLs dos repositórios ECR, `oidc_provider_arn` e `oidc_provider` do cluster, nomes dos parâmetros SSM e ARNs dos roles |
+
+Os pipelines dos microsserviços aplicam o próprio Terraform (filas, banco, role dos pods) além de publicar a imagem e fazer o deploy; por isso as roles deles têm o mesmo nível de acesso das roles dos repositórios de infraestrutura.
+
+Os nós são `t3.medium` porque um `t3.small` aceita no máximo 11 pods, e três microsserviços mais os agentes do New Relic e os componentes do cluster não cabem em dois deles.
 
 ## Como executar
 
@@ -122,13 +129,13 @@ Configuração no GitHub (Settings → Secrets and variables → Actions):
 ### Ordem entre os repositórios
 
 ```
-oficina-infra-k8s  →  oficina-infra-db  →  oficina-api (CD)  →  oficina-lambda-auth
+oficina-infra-k8s  →  oficina-infra-db  →  CD dos três microsserviços  →  oficina-lambda-auth
 ```
 
-Destruição na ordem inversa. Antes de destruir este repositório, remova o Service `LoadBalancer` da aplicação:
+Destruição na ordem inversa. Antes de destruir este repositório, remova os Services `LoadBalancer` dos microsserviços (o job `destroy` do pipeline já faz isso):
 
 ```bash
-kubectl delete svc oficina-api -n oficina-api --ignore-not-found
+kubectl delete svc --all-namespaces --field-selector spec.type=LoadBalancer --ignore-not-found
 terraform destroy
 ```
 
@@ -139,11 +146,11 @@ terraform destroy
 
 ## Custo e disponibilidade
 
-O ambiente é **provisionado sob demanda** para testes e para a gravação do vídeo e destruído em seguida (≈ US$ 0,50/h com EKS + 2 nós + RDS + NAT + NLB). Por isso os links de deploy podem estar fora do ar no momento da avaliação; o vídeo demonstra o pipeline e o ambiente em execução.
+O ambiente é **provisionado sob demanda** para testes e para a gravação do vídeo e destruído em seguida (≈ US$ 0,40/h com EKS, 2 nós, 2 instâncias RDS, NAT e 3 NLBs; SQS e DynamoDB cobram por requisição). Por isso os links de deploy podem estar fora do ar no momento da avaliação; o vídeo demonstra o pipeline e o ambiente em execução.
 
 ## Links
 
-- Aplicação: [gaabriel165/oficina-api](https://github.com/gaabriel165/oficina-api) · Swagger (com o ambiente no ar): `https://<api-id>.execute-api.us-east-1.amazonaws.com/swagger/index.html`
+- Microsserviços: [oficina-os-service](https://github.com/gaabriel165/oficina-os-service) · [oficina-billing-service](https://github.com/gaabriel165/oficina-billing-service) · [oficina-execution-service](https://github.com/gaabriel165/oficina-execution-service) · Swagger (com o ambiente no ar): `https://<api-id>.execute-api.us-east-1.amazonaws.com/swagger/index.html`
 - Banco: [gaabriel165/oficina-infra-db](https://github.com/gaabriel165/oficina-infra-db)
 - Autenticação serverless + API Gateway: [gaabriel165/oficina-lambda-auth](https://github.com/gaabriel165/oficina-lambda-auth)
-- Documentação de arquitetura (componentes, sequências, RFCs, ADRs, ER): [oficina-api/docs/architecture](https://github.com/gaabriel165/oficina-api/tree/main/docs/architecture)
+- Documentação de arquitetura (componentes, sequências, RFCs, ADRs, ER): [oficina-os-service/docs/architecture](https://github.com/gaabriel165/oficina-os-service/tree/main/docs/architecture)
